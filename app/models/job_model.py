@@ -4,6 +4,7 @@ from app.database import Base
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
 
     job_id = Column(String(50), primary_key=True, index=True)
     video_id = Column(String(50), index=True)
