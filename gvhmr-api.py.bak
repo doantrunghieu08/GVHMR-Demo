@@ -209,7 +209,7 @@ async def upload_video(video: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Không thể lưu video: {str(e)}")
 
-jobs_db = {}
+jobs_db = {}    
 def process_video_task(job_id: str, video_path: Path, static_cam: bool, use_dpvo: bool):
     """
         Xu ly tac vu video
