@@ -4,8 +4,11 @@ from app.controllers import health_controller, video_controller, job_controller,
 
 app = FastAPI(title="GVHMR API")
 
+from app.database import engine, Base
+
 @app.on_event("startup")
 def startup_event():
+    Base.metadata.create_all(bind=engine)
     load_model_into_gpu()
 
 app.include_router(health_controller.router)
