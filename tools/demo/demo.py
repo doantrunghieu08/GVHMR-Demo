@@ -8,6 +8,7 @@ import hydra
 from hydra import initialize_config_module, compose
 from pathlib import Path
 from pytorch3d.transforms import quaternion_to_matrix
+from omegaconf import OmegaConf
 
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.utils.video_io_utils import (
@@ -95,64 +96,92 @@ def parse_args_to_cfg():
     return cfg
 
 
+def get_paths_for_person(cfg, person_id: int):
+    """Trả về dict các đường dẫn file riêng biệt cho từng người.
+    Dùng OmegaConf để đọc cfg.paths gốc, sau đó thêm hậu tố _p{person_id}.
+    Các đường dẫn SLAM/VO được dùng chung (không tách per-person).
+    """
+    p = cfg.paths
+    suffix = f"_p{person_id}"
+    preprocess_dir = Path(cfg.preprocess_dir)
+    output_dir = Path(cfg.output_dir)
+    return {
+        "bbx":                     str(preprocess_dir / f"bbx{suffix}.pt"),
+        "bbx_xyxy_video_overlay":  str(preprocess_dir / f"bbx_xyxy_video_overlay{suffix}.mp4"),
+        "vit_features":            str(preprocess_dir / f"vit_features{suffix}.pt"),
+        "vitpose":                 str(preprocess_dir / f"vitpose{suffix}.pt"),
+        "vitpose_video_overlay":   str(preprocess_dir / f"vitpose_video_overlay{suffix}.mp4"),
+        "hmr4d_results":           str(output_dir / f"hmr4d_results{suffix}.pt"),
+        "incam_video":             str(output_dir / f"1_incam{suffix}.mp4"),
+        "global_video":            str(output_dir / f"2_global{suffix}.mp4"),
+        "incam_global_horiz_video":str(output_dir / f"{cfg.video_name}_3_incam_global_horiz{suffix}.mp4"),
+        # SLAM dùng chung — không cần tách per-person
+        "slam":                    str(p.slam),
+    }
+
+
 @torch.no_grad()
-def run_preprocess(cfg):
-    Log.info(f"[Preprocess] Start!")
+def run_preprocess(cfg, bbx_xyxy: torch.Tensor, person_id: int = 0):
+    """Tiền xử lý cho MỘT người dựa trên bbx_xyxy đã được track sẵn.
+    Args:
+        cfg: Hydra config.
+        bbx_xyxy: (L, 4) bounding box track của người này.
+        person_id: chỉ số người (0, 1, ...).
+    """
+    Log.info(f"[Preprocess] Bắt đầu — Người {person_id}")
     tic = Log.time()
     video_path = cfg.video_path
-    paths = cfg.paths
     static_cam = cfg.static_cam
     verbose = cfg.verbose
+    paths = get_paths_for_person(cfg, person_id)
 
-    # Get bbx tracking result
-    if not Path(paths.bbx).exists():
-        tracker = Tracker()
-        bbx_xyxy = tracker.get_one_track(video_path).float()  # (L, 4)
-        bbx_xys = get_bbx_xys_from_xyxy(bbx_xyxy, base_enlarge=1.2).float()  # (L, 3) apply aspect ratio and enlarge
-        torch.save({"bbx_xyxy": bbx_xyxy, "bbx_xys": bbx_xys}, paths.bbx)
-        del tracker
+    # --- BBX ---
+    if not Path(paths["bbx"]).exists():
+        bbx_xys = get_bbx_xys_from_xyxy(bbx_xyxy.float(), base_enlarge=1.2).float()  # (L, 3)
+        torch.save({"bbx_xyxy": bbx_xyxy.float(), "bbx_xys": bbx_xys}, paths["bbx"])
     else:
-        bbx_xys = torch.load(paths.bbx)["bbx_xys"]
-        Log.info(f"[Preprocess] bbx (xyxy, xys) from {paths.bbx}")
+        bbx_xys = torch.load(paths["bbx"])["bbx_xys"]
+        Log.info(f"[Preprocess] bbx từ cache: {paths['bbx']}")
+
     if verbose:
         video = read_video_np(video_path)
-        bbx_xyxy = torch.load(paths.bbx)["bbx_xyxy"]
-        video_overlay = draw_bbx_xyxy_on_image_batch(bbx_xyxy, video)
-        save_video(video_overlay, cfg.paths.bbx_xyxy_video_overlay)
+        video_overlay = draw_bbx_xyxy_on_image_batch(torch.load(paths["bbx"])["bbx_xyxy"], video)
+        save_video(video_overlay, paths["bbx_xyxy_video_overlay"])
 
-    # Get VitPose
-    if not Path(paths.vitpose).exists():
+    # --- VitPose ---
+    if not Path(paths["vitpose"]).exists():
         vitpose_extractor = VitPoseExtractor()
         vitpose = vitpose_extractor.extract(video_path, bbx_xys)
-        torch.save(vitpose, paths.vitpose)
+        torch.save(vitpose, paths["vitpose"])
         del vitpose_extractor
     else:
-        vitpose = torch.load(paths.vitpose)
-        Log.info(f"[Preprocess] vitpose from {paths.vitpose}")
+        vitpose = torch.load(paths["vitpose"])
+        Log.info(f"[Preprocess] vitpose từ cache: {paths['vitpose']}")
+
     if verbose:
         video = read_video_np(video_path)
         video_overlay = draw_coco17_skeleton_batch(video, vitpose, 0.5)
-        save_video(video_overlay, paths.vitpose_video_overlay)
+        save_video(video_overlay, paths["vitpose_video_overlay"])
 
-    # Get vit features
-    if not Path(paths.vit_features).exists():
+    # --- ViT Features ---
+    if not Path(paths["vit_features"]).exists():
         extractor = Extractor()
         vit_features = extractor.extract_video_features(video_path, bbx_xys)
-        torch.save(vit_features, paths.vit_features)
+        torch.save(vit_features, paths["vit_features"])
         del extractor
     else:
-        Log.info(f"[Preprocess] vit_features from {paths.vit_features}")
+        Log.info(f"[Preprocess] vit_features từ cache: {paths['vit_features']}")
 
-    # Get visual odometry results
-    if not static_cam:  # use slam to get cam rotation
-        if not Path(paths.slam).exists():
+    # --- Visual Odometry (SLAM) — dùng chung, chỉ chạy 1 lần ---
+    if not static_cam:
+        slam_path = paths["slam"]
+        if not Path(slam_path).exists():
             if not cfg.use_dpvo:
                 simple_vo = SimpleVO(cfg.video_path, scale=0.5, step=8, method="sift", f_mm=cfg.f_mm)
                 vo_results = simple_vo.compute()  # (L, 4, 4), numpy
-                torch.save(vo_results, paths.slam)
+                torch.save(vo_results, slam_path)
             else:  # DPVO
                 from hmr4d.utils.preproc.slam import SLAMModel
-
                 length, width, height = get_video_lwh(cfg.video_path)
                 K_fullimg = estimate_K(width, height)
                 intrinsics = convert_K_to_K4(K_fullimg)
@@ -165,20 +194,21 @@ def run_preprocess(cfg):
                     else:
                         break
                 slam_results = slam.process()  # (L, 7), numpy
-                torch.save(slam_results, paths.slam)
+                torch.save(slam_results, slam_path)
         else:
-            Log.info(f"[Preprocess] slam results from {paths.slam}")
+            Log.info(f"[Preprocess] slam results từ cache: {slam_path}")
 
-    Log.info(f"[Preprocess] End. Time elapsed: {Log.time()-tic:.2f}s")
+    Log.info(f"[Preprocess] Xong — Người {person_id}. Thời gian: {Log.time()-tic:.2f}s")
 
 
-def load_data_dict(cfg):
-    paths = cfg.paths
+def load_data_dict(cfg, person_id: int = 0):
+    """Nạp dữ liệu đầu vào cho mô hình của MỘT người."""
+    paths = get_paths_for_person(cfg, person_id)
     length, width, height = get_video_lwh(cfg.video_path)
     if cfg.static_cam:
         R_w2c = torch.eye(3).repeat(length, 1, 1)
     else:
-        traj = torch.load(cfg.paths.slam)
+        traj = torch.load(paths["slam"])
         if cfg.use_dpvo:  # DPVO
             traj_quat = torch.from_numpy(traj[:, [6, 3, 4, 5]])
             R_w2c = quaternion_to_matrix(traj_quat).mT
@@ -191,22 +221,24 @@ def load_data_dict(cfg):
 
     data = {
         "length": torch.tensor(length),
-        "bbx_xys": torch.load(paths.bbx)["bbx_xys"],
-        "kp2d": torch.load(paths.vitpose),
+        "bbx_xys": torch.load(paths["bbx"])["bbx_xys"],
+        "kp2d": torch.load(paths["vitpose"]),
         "K_fullimg": K_fullimg,
         "cam_angvel": compute_cam_angvel(R_w2c),
-        "f_imgseq": torch.load(paths.vit_features),
+        "f_imgseq": torch.load(paths["vit_features"]),
     }
     return data
 
 
-def render_incam(cfg):
-    incam_video_path = Path(cfg.paths.incam_video)
+def render_incam(cfg, person_id: int = 0):
+    """Render video in-camera cho MỘT người."""
+    paths = get_paths_for_person(cfg, person_id)
+    incam_video_path = Path(paths["incam_video"])
     if incam_video_path.exists():
-        Log.info(f"[Render Incam] Video already exists at {incam_video_path}")
+        Log.info(f"[Render Incam P{person_id}] Video đã tồn tại: {incam_video_path}")
         return
 
-    pred = torch.load(cfg.paths.hmr4d_results)
+    pred = torch.load(paths["hmr4d_results"])
     smplx = make_smplx("supermotion").cuda()
     smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt").cuda()
     faces_smpl = make_smplx("smpl").faces
@@ -223,33 +255,27 @@ def render_incam(cfg):
     # renderer
     renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K)
     reader = get_video_reader(video_path)  # (F, H, W, 3), uint8, numpy
-    bbx_xys_render = torch.load(cfg.paths.bbx)["bbx_xys"]
 
     # -- render mesh -- #
     verts_incam = pred_c_verts
     writer = get_writer(incam_video_path, fps=30, crf=CRF)
-    for i, img_raw in tqdm(enumerate(reader), total=get_video_lwh(video_path)[0], desc=f"Rendering Incam"):
+    for i, img_raw in tqdm(enumerate(reader), total=get_video_lwh(video_path)[0], desc=f"Rendering Incam P{person_id}"):
         img = renderer.render_mesh(verts_incam[i].cuda(), img_raw, [0.8, 0.8, 0.8])
-
-        # # bbx
-        # bbx_xys_ = bbx_xys_render[i].cpu().numpy()
-        # lu_point = (bbx_xys_[:2] - bbx_xys_[2:] / 2).astype(int)
-        # rd_point = (bbx_xys_[:2] + bbx_xys_[2:] / 2).astype(int)
-        # img = cv2.rectangle(img, lu_point, rd_point, (255, 178, 102), 2)
-
         writer.write_frame(img)
     writer.close()
     reader.close()
 
 
-def render_global(cfg):
-    global_video_path = Path(cfg.paths.global_video)
+def render_global(cfg, person_id: int = 0):
+    """Render video global 3D cho MỘT người."""
+    paths = get_paths_for_person(cfg, person_id)
+    global_video_path = Path(paths["global_video"])
     if global_video_path.exists():
-        Log.info(f"[Render Global] Video already exists at {global_video_path}")
+        Log.info(f"[Render Global P{person_id}] Video đã tồn tại: {global_video_path}")
         return
 
     debug_cam = False
-    pred = torch.load(cfg.paths.hmr4d_results)
+    pred = torch.load(paths["hmr4d_results"])
     smplx = make_smplx("supermotion").cuda()
     smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt").cuda()
     faces_smpl = make_smplx("smpl").faces
@@ -287,7 +313,6 @@ def render_global(cfg):
 
     # renderer
     renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K)
-    # renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K, bin_size=0)
 
     # -- render mesh -- #
     scale, cx, cz = get_ground_params_from_points(joints_glob[:, 0], verts_glob)
@@ -296,7 +321,7 @@ def render_global(cfg):
 
     render_length = length if not debug_cam else 8
     writer = get_writer(global_video_path, fps=30, crf=CRF)
-    for i in tqdm(range(render_length), desc=f"Rendering Global"):
+    for i in tqdm(range(render_length), desc=f"Rendering Global P{person_id}"):
         cameras = renderer.create_camera(global_R[i], global_T[i])
         img = renderer.render_with_ground(verts_glob[[i]], color[None], cameras, global_lights)
         writer.write_frame(img)
@@ -305,30 +330,46 @@ def render_global(cfg):
 
 if __name__ == "__main__":
     cfg = parse_args_to_cfg()
-    paths = cfg.paths
     Log.info(f"[GPU]: {torch.cuda.get_device_name()}")
     Log.info(f'[GPU]: {torch.cuda.get_device_properties("cuda")}')
 
-    # ===== Preprocess and save to disk ===== #
-    run_preprocess(cfg)
-    data = load_data_dict(cfg)
+    # ===== Track tất cả người (tối đa 2) ===== #
+    tracker = Tracker()
+    all_bbx_xyxy = tracker.get_n_tracks(cfg.video_path, n=2)  # List[Tensor(F, 4)]
+    del tracker
+    num_people = len(all_bbx_xyxy)
+    Log.info(f"[Tracking] Phát hiện {num_people} người")
 
-    # ===== HMR4D ===== #
-    if not Path(paths.hmr4d_results).exists():
-        Log.info("[HMR4D] Predicting")
-        model: DemoPL = hydra.utils.instantiate(cfg.model, _recursive_=False)
-        model.load_pretrained_model(cfg.ckpt_path)
-        model = model.eval().cuda()
-        tic = Log.sync_time()
-        pred = model.predict(data, static_cam=cfg.static_cam)
-        pred = detach_to_cpu(pred)
-        data_time = data["length"] / 30
-        Log.info(f"[HMR4D] Elapsed: {Log.sync_time() - tic:.2f}s for data-length={data_time:.1f}s")
-        torch.save(pred, paths.hmr4d_results)
+    # ===== Xử lý từng người ===== #
+    model: DemoPL = hydra.utils.instantiate(cfg.model, _recursive_=False)
+    model.load_pretrained_model(cfg.ckpt_path)
+    model = model.eval().cuda()
 
-    # ===== Render ===== #
-    render_incam(cfg)
-    render_global(cfg)
-    if not Path(paths.incam_global_horiz_video).exists():
-        Log.info("[Merge Videos]")
-        merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)
+    for person_id, bbx_xyxy in enumerate(all_bbx_xyxy):
+        Log.info(f"\n{'='*40}\n[Xử lý Người {person_id}]\n{'='*40}")
+        paths_p = get_paths_for_person(cfg, person_id)
+
+        # Preprocess
+        run_preprocess(cfg, bbx_xyxy, person_id=person_id)
+        data = load_data_dict(cfg, person_id=person_id)
+
+        # HMR4D predict
+        if not Path(paths_p["hmr4d_results"]).exists():
+            Log.info(f"[HMR4D P{person_id}] Predicting")
+            tic = Log.sync_time()
+            pred = model.predict(data, static_cam=cfg.static_cam)
+            pred = detach_to_cpu(pred)
+            data_time = data["length"] / 30
+            Log.info(f"[HMR4D P{person_id}] Elapsed: {Log.sync_time() - tic:.2f}s for data-length={data_time:.1f}s")
+            torch.save(pred, paths_p["hmr4d_results"])
+
+        # Render
+        render_incam(cfg, person_id=person_id)
+        render_global(cfg, person_id=person_id)
+        horiz_path = paths_p["incam_global_horiz_video"]
+        if not Path(horiz_path).exists():
+            Log.info(f"[Merge Videos P{person_id}]")
+            merge_videos_horizontal(
+                [paths_p["incam_video"], paths_p["global_video"]],
+                horiz_path
+            )

@@ -134,6 +134,10 @@ paths:
                   progress:
                     type: string
                     example: "Hoàn thành"
+                  created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-08-14T04:15:30Z"
                   result:
                     type: object
                     nullable: true
@@ -146,6 +150,35 @@ paths:
                         example: "output/result/hmr4d_results.pt"
         '404':
           description: Không tìm thấy tác vụ với `job_id` cung cấp
+
+  /api/v1/jobs/{job_id}/download:
+    get:
+      summary: Tải kết quả tác vụ (Download Job Results)
+      description: Nén (ZIP) file video và file tọa độ 3D (.pt) của tác vụ rồi tải về máy tính.
+      operationId: download_job_results
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          description: ID của tác vụ cần tải kết quả
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tải xuống thành công file ZIP
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Tác vụ chưa hoàn thành
+        '404':
+          description: Không tìm thấy tác vụ hoặc file kết quả không tồn tại
+        '500':
+          description: Lỗi thiếu thông tin file kết quả
 
   /api/v1/metrics/evaluate:
     post:

@@ -18,7 +18,7 @@ def get_api_config(video_path: Path, static_cam: bool = False, use_dpvo: bool = 
         hydra_initalized = True
          
     overrides = [
-        f"video_name={video_path.stem}",
+        f"video_name='{video_path.stem}'",
         f"static_cam={str(static_cam).lower()}",
         f"verbose=False",
         f"use_dpvo={str(use_dpvo).lower()}"

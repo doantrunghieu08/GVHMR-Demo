@@ -93,3 +93,33 @@ class Tracker:
         bbx_xyxy_one_track = moving_average_smooth(bbx_xyxy_one_track, window_size=5, dim=0)
 
         return bbx_xyxy_one_track
+
+    def get_n_tracks(self, video_path, n=2):
+        """Trả về danh sách top-n track (bbx_xyxy) sắp xếp theo diện tích giảm dần.
+        Nếu video có ít hơn n người, trả về số người thực tế tìm được.
+        """
+        track_history = self.track(video_path)
+        id_to_frame_ids, id_to_bbx_xyxys, id_sorted = self.sort_track_length(track_history, video_path)
+
+        num_people = min(n, len(id_sorted))
+        total_frames = get_video_lwh(video_path)[0]
+
+        all_tracks = []
+        for i in range(num_people):
+            track_id = id_sorted[i]
+            frame_ids = torch.tensor(id_to_frame_ids[track_id])   # (N,)
+            bbx_xyxys = torch.tensor(id_to_bbx_xyxys[track_id])  # (N, 4)
+
+            # Nội suy các frame bị thiếu
+            mask = frame_id_to_mask(frame_ids, total_frames)
+            bbx_xyxy_track = rearrange_by_mask(bbx_xyxys, mask)
+            missing_frame_id_list = get_frame_id_list_from_mask(~mask)
+            bbx_xyxy_track = linear_interpolate_frame_ids(bbx_xyxy_track, missing_frame_id_list)
+            assert (bbx_xyxy_track.sum(1) != 0).all(), f"Người {i}: tồn tại frame bbx bằng 0 sau nội suy"
+
+            bbx_xyxy_track = moving_average_smooth(bbx_xyxy_track, window_size=5, dim=0)
+            bbx_xyxy_track = moving_average_smooth(bbx_xyxy_track, window_size=5, dim=0)
+
+            all_tracks.append(bbx_xyxy_track)
+
+        return all_tracks  # List[Tensor(F, 4)], độ dài = min(n, số người phát hiện)
