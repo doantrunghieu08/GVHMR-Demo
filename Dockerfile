@@ -37,4 +37,4 @@ RUN mkdir -p input/temp_upload output/result inputs/checkpoints
 EXPOSE 8000
 
 # Khởi chạy Uvicorn Server
-CMD ["uvicorn", "gvhmr-api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
