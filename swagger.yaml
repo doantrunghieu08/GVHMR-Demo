@@ -4,6 +4,12 @@ info:
   version: 1.0.0
   description: Tài liệu API cho hệ thống phân tích và xử lý video GVHMR
 servers:
+  - url: https://{pod_id}-8000.proxy.runpod.net
+    description: RunPod Proxy Server
+    variables:
+      pod_id:
+        default: YOUR_POD_ID
+        description: RunPod Pod ID (thay bằng ID thực tế)
   - url: http://localhost:8000
     description: Local development server
 paths:
