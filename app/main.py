@@ -21,10 +21,13 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+import threading
+
 @app.on_event("startup")
 def startup_event():
     Base.metadata.create_all(bind=engine)
-    load_model_into_gpu()
+    # Tải model ở luồng ngầm để server khởi động ngay lập tức (<1s), không treo request
+    threading.Thread(target=load_model_into_gpu, daemon=True).start()
 
 app.include_router(health_controller.router)
 app.include_router(video_controller.router)

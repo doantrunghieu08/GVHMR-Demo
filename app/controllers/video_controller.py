@@ -18,7 +18,8 @@ async def upload_video(video: UploadFile = File(...)):
 
     try:
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(video.file, buffer)
+            while chunk := await video.read(1MB := 1024 * 1024):
+                buffer.write(chunk)
             
         return {
             "status": "success",
