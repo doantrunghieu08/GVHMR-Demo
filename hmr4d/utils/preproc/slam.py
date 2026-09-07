@@ -3,12 +3,24 @@ import time
 import torch
 from multiprocessing import Process, Queue
 
+import sys
+from hmr4d import PROJ_ROOT
+
+# Tự động thêm thư mục third-party/DPVO vào sys.path nếu chưa có
+dpvo_dir = str(PROJ_ROOT / "third-party/DPVO")
+if dpvo_dir not in sys.path:
+    sys.path.insert(0, dpvo_dir)
+
+DPVO_AVAILABLE = False
 try:
     from dpvo.utils import Timer
     from dpvo.dpvo import DPVO
     from dpvo.config import cfg
-except:
-    pass
+    DPVO_AVAILABLE = True
+except Exception as e:
+    Timer = None
+    DPVO = None
+    cfg = None
 
 
 from hmr4d import PROJ_ROOT
@@ -21,6 +33,12 @@ class SLAMModel(object):
         Args:
             intrinsics: [fx, fy, cx, cy]
         """
+        if not DPVO_AVAILABLE:
+            raise RuntimeError(
+                "Mô hình DPVO chưa được cài đặt hoặc thiếu thư viện phụ thuộc. "
+                "Vui lòng đặt use_dpvo=False khi tạo job để sử dụng SimpleVO, hoặc đặt static_cam=True nếu video từ camera tĩnh."
+            )
+
         if intrinsics is None:
             print("Estimating focal length")
             focal_length = estimate_focal_length(width, height)

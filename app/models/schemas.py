@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, NonNegativeInt
 class JobCreateRequest(BaseModel):
     video_id: str
     static_cam: bool = True
-    use_dpvo: bool = True
+    use_dpvo: bool = False
 
 class CalculateMetricsRequest(BaseModel):
     pred_j3d: Optional[List[Any]] = None          # (F, J, 3) hoặc (J, 3)

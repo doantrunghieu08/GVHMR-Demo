@@ -176,7 +176,12 @@ def run_preprocess(cfg, bbx_xyxy: torch.Tensor, person_id: int = 0):
     if not static_cam:
         slam_path = paths["slam"]
         if not Path(slam_path).exists():
-            if not cfg.use_dpvo:
+            from hmr4d.utils.preproc.slam import DPVO_AVAILABLE
+            use_dpvo_actual = cfg.use_dpvo and DPVO_AVAILABLE
+            if cfg.use_dpvo and not DPVO_AVAILABLE:
+                Log.info("[Preprocess] DPVO chưa được cài đặt. Tự động chuyển sang dùng SimpleVO cho camera di chuyển.")
+
+            if not use_dpvo_actual:
                 simple_vo = SimpleVO(cfg.video_path, scale=0.5, step=8, method="sift", f_mm=cfg.f_mm)
                 vo_results = simple_vo.compute()  # (L, 4, 4), numpy
                 torch.save(vo_results, slam_path)
