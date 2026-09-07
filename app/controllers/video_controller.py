@@ -16,11 +16,15 @@ async def upload_video(video: UploadFile = File(...)):
     filename = Path(video.filename or "video.mp4").name
     file_path = UPLOAD_DIR / f"{video_id}_{filename}"
 
+    print(f"\n[UPLOAD] Dang nhan file: {filename} (ID: {video_id})")
     try:
         with open(file_path, "wb") as buffer:
+            size = 0
             while chunk := await video.read(1024 * 1024):
                 buffer.write(chunk)
+                size += len(chunk)
             
+        print(f"[UPLOAD SUCCESS] Da luu file {filename} ({size / (1024*1024):.2f} MB)")
         return {
             "status": "success",
             "video_id": video_id,

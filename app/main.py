@@ -16,10 +16,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*", "X-API-Key", "Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
     expose_headers=["*"],
+    max_age=3600,
 )
+
+@app.options("/{full_path:path}")
+async def options_override(full_path: str):
+    return {}
 
 import threading
 
