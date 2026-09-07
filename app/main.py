@@ -4,7 +4,12 @@ from app.services.model_service import load_model_into_gpu
 from app.controllers import health_controller, video_controller, job_controller, metrics_controller
 from app.database import engine, Base
 
-app = FastAPI(title="GVHMR API")
+app = FastAPI(
+    title="GVHMR API",
+    servers=[
+        {"url": "/", "description": "Current Host (Relative URL)"},
+    ]
+)
 
 # Thêm CORS Middleware cho phép mọi domain truy cập
 app.add_middleware(
