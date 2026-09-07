@@ -43,17 +43,17 @@ def load_model_into_gpu():
     print("Loading GVHMR model into GPU...")
 
     global hydra_initalized
+    register_store_gvhmr()
     if not hydra_initalized:
         initialize_config_module(version_base="1.3", config_module="hmr4d.configs")
         hydra_initalized = True
 
-        register_store_gvhmr()
-        config = compose(config_name="demo")
-        
-        model = hydra.utils.instantiate(config.model, _recursive_=False)
-        model.load_pretrained_model(ckpt_path)
-        model = model.eval().cuda()
-        print("Model loaded successfully")
+    config = compose(config_name="demo")
+    
+    model = hydra.utils.instantiate(config.model, _recursive_=False)
+    model.load_pretrained_model(ckpt_path)
+    model = model.eval().cuda()
+    print("Model loaded successfully")
 
 def get_model():
     return model
