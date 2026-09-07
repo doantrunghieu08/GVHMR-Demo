@@ -10,6 +10,11 @@ from hmr4d.utils.eval.eval_utils import (
 )
 from app.services.job_service import get_job
 
+
+def _first_present(mapping, *keys):
+    return next((mapping[key] for key in keys if mapping.get(key) is not None), None)
+
+
 def evaluate_metrics_logic(request):
     pred_data = request.pred_j3d
 
@@ -36,7 +41,7 @@ def evaluate_metrics_logic(request):
             elif "pred_j3d" in pt_data:
                 pred_data = pt_data["pred_j3d"]
             elif "smpl_params_incam" in pt_data or "smpl_params_global" in pt_data:
-                smpl_params = pt_data.get("smpl_params_incam") or pt_data.get("smpl_params_global")
+                smpl_params = _first_present(pt_data, "smpl_params_incam", "smpl_params_global")
                 from hmr4d.model.gvhmr.utils.endecoder import EnDecoder
                 endecoder = EnDecoder()
                 with torch.no_grad():
@@ -55,6 +60,8 @@ def evaluate_metrics_logic(request):
                     pred_data = endecoder.fk_v2(body_pose, betas, global_orient, transl)[0]  # (F, 22, 3)
             else:
                 raise HTTPException(status_code=400, detail="File kết quả không chứa dữ liệu j3d hoặc smpl_params hợp lệ.")
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Lỗi khi đọc file kết quả job: {str(e)}")
 
@@ -72,7 +79,7 @@ def evaluate_metrics_logic(request):
                 if isinstance(loaded_npy, np.ndarray):
                     if loaded_npy.dtype == object and loaded_npy.ndim == 0:
                         dict_data = loaded_npy.item()
-                        target_data = dict_data.get("j3d") or dict_data.get("gt_j3d") or dict_data.get("joints3d") or dict_data.get("target_j3d") or dict_data.get("joints")
+                        target_data = _first_present(dict_data, "j3d", "gt_j3d", "joints3d", "target_j3d", "joints")
                     else:
                         target_data = loaded_npy
                 elif isinstance(loaded_npy, dict):
@@ -80,7 +87,7 @@ def evaluate_metrics_logic(request):
             elif gt_path.suffix in [".pt", ".pth"]:
                 loaded_pt = torch.load(gt_path, map_location="cpu")
                 if isinstance(loaded_pt, dict):
-                    target_data = loaded_pt.get("j3d") or loaded_pt.get("j3d_cam") or loaded_pt.get("j3d_glob") or loaded_pt.get("target_j3d") or loaded_pt.get("gt_j3d")
+                    target_data = _first_present(loaded_pt, "j3d", "j3d_cam", "j3d_glob", "target_j3d", "gt_j3d")
                 else:
                     target_data = loaded_pt
         except Exception as e:

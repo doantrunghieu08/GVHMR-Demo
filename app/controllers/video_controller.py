@@ -1,4 +1,5 @@
 import shutil
+from pathlib import Path
 from uuid import uuid4
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
@@ -12,7 +13,8 @@ router = APIRouter()
 async def upload_video(video: UploadFile = File(...)):
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     video_id = str(uuid4())
-    file_path = UPLOAD_DIR / f"{video_id}_{video.filename}"
+    filename = Path(video.filename or "video.mp4").name
+    file_path = UPLOAD_DIR / f"{video_id}_{filename}"
 
     try:
         with open(file_path, "wb") as buffer:
@@ -21,7 +23,7 @@ async def upload_video(video: UploadFile = File(...)):
         return {
             "status": "success",
             "video_id": video_id,
-            "filename": video.filename,
+            "filename": filename,
             "saved_path": str(file_path)
         }
     except Exception as e:

@@ -8,7 +8,6 @@ from pathlib import Path
 from app.security import verify_token
 from app.models.schemas import JobCreateRequest
 from app.services.job_service import create_job_entry, get_job
-from app.services.video_service import process_video_task
 from app.services.model_service import get_model
 from app.config import UPLOAD_DIR
 
@@ -34,6 +33,7 @@ async def create_job(
     
     job_id = str(uuid4())
     create_job_entry(job_id, request.video_id)
+    from app.services.video_service import process_video_task
 
     background_tasks.add_task(
         process_video_task,
@@ -116,4 +116,3 @@ def download_job_results(job_id: str):
                 zipf.write(file_path, arcname=arcname)
 
     return FileResponse(path=str(zip_path), filename=zip_filename, media_type="application/zip")
-

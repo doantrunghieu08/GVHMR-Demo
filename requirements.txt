@@ -60,6 +60,8 @@ pycolmap
 # ==========================================
 # 6. 2D Pose & Tracking
 # ==========================================
+ultralytics==8.2.42
+yacs==0.1.8
 # cython_bbox yêu cầu C++ compiler (MSVC trên Windows / gcc trên Linux)
 cython_bbox ; sys_platform == 'linux'
 lapx
