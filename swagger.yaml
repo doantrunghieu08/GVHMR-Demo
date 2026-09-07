@@ -76,6 +76,46 @@ paths:
         '500':
           description: Lỗi hệ thống trong quá trình lưu file
 
+  /api/v1/video/register-local:
+    post:
+      summary: Đăng ký Video có sẵn trên server RunPod (Tránh giới hạn upload proxy)
+      description: Nhập đường dẫn file video có sẵn trên server RunPod để tạo `video_id` trực tiếp.
+      operationId: register_local_video
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - file_path
+              properties:
+                file_path:
+                  type: string
+                  example: "input/demo.mp4"
+                  description: Đường dẫn tương đối hoặc tuyệt đối tới file video trên RunPod
+      responses:
+        '200':
+          description: Đăng ký thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "success"
+                  video_id:
+                    type: string
+                  filename:
+                    type: string
+                  saved_path:
+                    type: string
+        '500':
+          description: Lỗi hệ thống trong quá trình lưu file
+
   /api/v1/jobs:
     post:
       summary: Tạo tác vụ xử lý (Create Job)

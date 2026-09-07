@@ -34,6 +34,34 @@ async def upload_video(video: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Không thể lưu video: {str(e)}")
 
+from pydantic import BaseModel, Field
+
+class RegisterLocalVideoRequest(BaseModel):
+    file_path: str = Field(..., example="input/demo.mp4", description="Đường dẫn file video trên server RunPod (VD: input/demo.mp4 hoặc /root/.../video.mp4)")
+
+@router.post("/api/v1/video/register-local", dependencies=[Depends(verify_token)])
+def register_local_video(request: RegisterLocalVideoRequest):
+    """
+    Sử dụng video có sẵn trên server RunPod để tạo video_id (Tránh lỗi giới hạn dung lượng upload qua Proxy Web)
+    """
+    src_path = Path(request.file_path)
+    if not src_path.exists():
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy file tại đường dẫn: {request.file_path}")
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    video_id = str(uuid4())
+    filename = src_path.name
+    dest_path = UPLOAD_DIR / f"{video_id}_{filename}"
+
+    shutil.copy(src_path, dest_path)
+    print(f"[REGISTER SUCCESS] Đã đăng ký file có sẵn: {filename} -> {video_id}")
+    return {
+        "status": "success",
+        "video_id": video_id,
+        "filename": filename,
+        "saved_path": str(dest_path)
+    }
+
 @router.get("/api/v1/download/{filename}", dependencies=[Depends(verify_token)])
 def download_result(filename: str):
     file_path = OUTPUT_DIR / filename
