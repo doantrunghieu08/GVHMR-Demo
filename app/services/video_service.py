@@ -12,6 +12,7 @@ from hmr4d.utils.video_io_utils import merge_videos_horizontal
 from hmr4d.utils.preproc import Tracker
 from tools.demo.demo import (
     get_paths_for_person,
+    precompute_vitpose,
     run_preprocess,
     load_data_dict,
     render_incam,
@@ -76,6 +77,9 @@ def process_video_task(job_id: str, video_path: Path, static_cam: bool, use_dpvo
         if num_people == 0:
             raise RuntimeError("Không phát hiện được người nào trong video.")
 
+        update_job(job_id, {"progress": "Đang chạy ViTPose cho các người được phát hiện..."})
+        precompute_vitpose(cfg, all_bbx_xyxy)
+
         # 3. Xử lý từng người
         output_video_urls = []
         result_file_paths = []
@@ -132,6 +136,8 @@ def process_video_task(job_id: str, video_path: Path, static_cam: bool, use_dpvo
 
             output_video_urls.append(f"/api/v1/download/{final_video_path.name}")
             result_file_paths.append(str(paths_p["hmr4d_results"]))
+            del data, pred
+            torch.cuda.empty_cache()
 
         # 4. Hoàn thành
         update_job(job_id, {

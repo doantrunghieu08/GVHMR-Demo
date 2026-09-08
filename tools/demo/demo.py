@@ -121,6 +121,64 @@ def get_paths_for_person(cfg, person_id: int):
 
 
 @torch.no_grad()
+def run_vitpose(cfg, bbx_xyxy: torch.Tensor, person_id: int = 0, extractor=None):
+    paths = get_paths_for_person(cfg, person_id)
+
+    if not Path(paths["bbx"]).exists():
+        bbx_xys = get_bbx_xys_from_xyxy(bbx_xyxy.float(), base_enlarge=1.2).float()
+        torch.save({"bbx_xyxy": bbx_xyxy.float(), "bbx_xys": bbx_xys}, paths["bbx"])
+    else:
+        bbx_xys = torch.load(paths["bbx"])["bbx_xys"]
+        Log.info(f"[Preprocess] bbx từ cache: {paths['bbx']}")
+
+    if cfg.verbose:
+        video = read_video_np(cfg.video_path)
+        video_overlay = draw_bbx_xyxy_on_image_batch(torch.load(paths["bbx"])["bbx_xyxy"], video)
+        save_video(video_overlay, paths["bbx_xyxy_video_overlay"])
+
+    if not Path(paths["vitpose"]).exists():
+        owns_extractor = extractor is None
+        if owns_extractor:
+            extractor = VitPoseExtractor()
+        try:
+            vitpose = extractor.extract(cfg.video_path, bbx_xys)
+        finally:
+            if owns_extractor:
+                del extractor
+                torch.cuda.empty_cache()
+        torch.save(vitpose, paths["vitpose"])
+    else:
+        vitpose = torch.load(paths["vitpose"])
+        Log.info(f"[Preprocess] vitpose từ cache: {paths['vitpose']}")
+
+    if cfg.verbose:
+        video = read_video_np(cfg.video_path)
+        video_overlay = draw_coco17_skeleton_batch(video, vitpose, 0.5)
+        save_video(video_overlay, paths["vitpose_video_overlay"])
+
+    return bbx_xys
+
+
+def precompute_vitpose(cfg, all_bbx_xyxy):
+    pending = [
+        (person_id, bbx_xyxy)
+        for person_id, bbx_xyxy in enumerate(all_bbx_xyxy)
+        if not Path(get_paths_for_person(cfg, person_id)["vitpose"]).exists()
+    ]
+    if not pending:
+        return
+
+    extractor = VitPoseExtractor()
+    try:
+        for person_id, bbx_xyxy in pending:
+            Log.info(f"[Preprocess] ViTPose — Người {person_id}")
+            run_vitpose(cfg, bbx_xyxy, person_id, extractor)
+    finally:
+        del extractor
+        torch.cuda.empty_cache()
+
+
+@torch.no_grad()
 def run_preprocess(cfg, bbx_xyxy: torch.Tensor, person_id: int = 0):
     """Tiền xử lý cho MỘT người dựa trên bbx_xyxy đã được track sẵn.
     Args:
@@ -132,36 +190,9 @@ def run_preprocess(cfg, bbx_xyxy: torch.Tensor, person_id: int = 0):
     tic = Log.time()
     video_path = cfg.video_path
     static_cam = cfg.static_cam
-    verbose = cfg.verbose
     paths = get_paths_for_person(cfg, person_id)
 
-    # --- BBX ---
-    if not Path(paths["bbx"]).exists():
-        bbx_xys = get_bbx_xys_from_xyxy(bbx_xyxy.float(), base_enlarge=1.2).float()  # (L, 3)
-        torch.save({"bbx_xyxy": bbx_xyxy.float(), "bbx_xys": bbx_xys}, paths["bbx"])
-    else:
-        bbx_xys = torch.load(paths["bbx"])["bbx_xys"]
-        Log.info(f"[Preprocess] bbx từ cache: {paths['bbx']}")
-
-    if verbose:
-        video = read_video_np(video_path)
-        video_overlay = draw_bbx_xyxy_on_image_batch(torch.load(paths["bbx"])["bbx_xyxy"], video)
-        save_video(video_overlay, paths["bbx_xyxy_video_overlay"])
-
-    # --- VitPose ---
-    if not Path(paths["vitpose"]).exists():
-        vitpose_extractor = VitPoseExtractor()
-        vitpose = vitpose_extractor.extract(video_path, bbx_xys)
-        torch.save(vitpose, paths["vitpose"])
-        del vitpose_extractor
-    else:
-        vitpose = torch.load(paths["vitpose"])
-        Log.info(f"[Preprocess] vitpose từ cache: {paths['vitpose']}")
-
-    if verbose:
-        video = read_video_np(video_path)
-        video_overlay = draw_coco17_skeleton_batch(video, vitpose, 0.5)
-        save_video(video_overlay, paths["vitpose_video_overlay"])
+    bbx_xys = run_vitpose(cfg, bbx_xyxy, person_id)
 
     # --- ViT Features ---
     if not Path(paths["vit_features"]).exists():
@@ -344,6 +375,8 @@ if __name__ == "__main__":
     del tracker
     num_people = len(all_bbx_xyxy)
     Log.info(f"[Tracking] Phát hiện {num_people} người")
+
+    precompute_vitpose(cfg, all_bbx_xyxy)
 
     # ===== Xử lý từng người ===== #
     model: DemoPL = hydra.utils.instantiate(cfg.model, _recursive_=False)
