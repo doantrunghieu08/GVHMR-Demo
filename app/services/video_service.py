@@ -139,6 +139,7 @@ def process_video_task(job_id: str, video_path: Path, static_cam: bool, use_dpvo
             "progress": f"Hoàn thành — {num_people} người đã xử lý",
             "result": {
                 "num_people": num_people,
+                "output_dir": str(cfg.output_dir),
                 "output_video_urls": output_video_urls,
                 "result_file_paths": result_file_paths,
                 # Giữ tương thích ngược với client cũ (lấy người đầu tiên)

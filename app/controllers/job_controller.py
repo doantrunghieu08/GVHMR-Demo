@@ -92,15 +92,37 @@ def download_job_results(job_id: str):
     # Thu thập tất cả các file cần đóng gói
     files_to_zip = []  # list of (path, arcname)
 
+    # 1. Tìm thư mục output đầy đủ của job (chứa video, .pt kết quả và thư mục preprocess)
+    target_dir = None
+    if result.get("output_dir"):
+        out_p = Path(result["output_dir"])
+        if out_p.exists() and out_p.is_dir():
+            target_dir = out_p
+
+    if not target_dir and result_file_paths_raw:
+        pt_p = Path(result_file_paths_raw[0])
+        if pt_p.exists() and pt_p.parent.is_dir():
+            target_dir = pt_p.parent
+
+    # Nếu tìm thấy thư mục job đầy đủ, thêm toàn bộ thư mục và các subfolder (preprocess, v.v...) vào zip
+    if target_dir:
+        dir_name = target_dir.name
+        for file_path in target_dir.rglob("*"):
+            if file_path.is_file() and not file_path.name.endswith(".zip"):
+                rel_path = Path(dir_name) / file_path.relative_to(target_dir)
+                files_to_zip.append((file_path, str(rel_path)))
+
+    # 2. Thêm các file video ở OUTPUT_DIR root nếu chưa có trong zip
     for url in video_urls:
         filename = url.split("/")[-1]
         path = OUTPUT_DIR / filename
-        if path.exists():
+        if path.exists() and not any(f[0] == path for f in files_to_zip):
             files_to_zip.append((path, filename))
 
+    # 3. Fallback: nếu chưa lấy được thư mục, lấy lẻ từng file .pt
     for pt_path_str in result_file_paths_raw:
         pt_path = Path(pt_path_str)
-        if pt_path.exists():
+        if pt_path.exists() and not any(f[0] == pt_path for f in files_to_zip):
             files_to_zip.append((pt_path, pt_path.name))
 
     if not files_to_zip:
@@ -109,10 +131,15 @@ def download_job_results(job_id: str):
     zip_filename = f"{job_id}_results.zip"
     zip_path = OUTPUT_DIR / zip_filename
 
-    # Tạo file zip nếu chưa có
-    if not zip_path.exists():
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for file_path, arcname in files_to_zip:
-                zipf.write(file_path, arcname=arcname)
+    # Tạo file zip nếu chưa có (xóa zip cũ nếu cấu trúc zip được cập nhật)
+    if zip_path.exists():
+        try:
+            zip_path.unlink()
+        except Exception:
+            pass
+
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for file_path, arcname in files_to_zip:
+            zipf.write(file_path, arcname=arcname)
 
     return FileResponse(path=str(zip_path), filename=zip_filename, media_type="application/zip")
