@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.services.model_service import load_model_into_gpu
 from app.controllers import health_controller, video_controller, job_controller, metrics_controller
 from app.database import engine, Base
+from app.config import USE_SQL
 
 app = FastAPI(
     title="GVHMR API",
@@ -30,7 +31,8 @@ import threading
 
 @app.on_event("startup")
 def startup_event():
-    Base.metadata.create_all(bind=engine)
+    if USE_SQL and Base is not None and engine is not None:
+        Base.metadata.create_all(bind=engine)
     # Tải model ở luồng ngầm để server khởi động ngay lập tức (<1s), không treo request
     threading.Thread(target=load_model_into_gpu, daemon=True).start()
 

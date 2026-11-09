@@ -3,33 +3,35 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
-_temp_dir = tempfile.TemporaryDirectory()
-os.environ["DATABASE_URL"] = f"sqlite:///{(Path(_temp_dir.name) / 'jobs.db').as_posix()}"
-
 from pydantic import ValidationError
 
+import app.config as config
 from app.database import Base, engine
 from app.models.schemas import CalculateMetricsRequest
 from app.services.job_service import create_job_entry, get_job, update_job
 
 
 class ApiPersistenceTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
+    def test_job_in_memory(self):
+        config.USE_SQL = False
+        create_job_entry("job-mem-1", "video-1")
+        update_job("job-mem-1", {"status": "COMPLETED", "result": {"ok": True}})
+
+        job = get_job("job-mem-1")
+        self.assertIsNotNone(job)
+        self.assertEqual(job["status"], "COMPLETED")
+        self.assertEqual(job["result"], {"ok": True})
+
+    @unittest.skipIf(Base is None, "SQLAlchemy is not installed")
+    def test_job_sql_backend(self):
+        config.USE_SQL = True
         Base.metadata.create_all(bind=engine)
-
-    @classmethod
-    def tearDownClass(cls):
-        engine.dispose()
-        _temp_dir.cleanup()
-
-    def test_job_survives_new_database_connection(self):
-        create_job_entry("job-1", "video-1")
-        update_job("job-1", {"status": "COMPLETED", "result": {"ok": True}})
+        create_job_entry("job-sql-1", "video-2")
+        update_job("job-sql-1", {"status": "COMPLETED", "result": {"ok": True}})
         engine.dispose()
 
-        job = get_job("job-1")
+        job = get_job("job-sql-1")
+        self.assertIsNotNone(job)
         self.assertEqual(job["status"], "COMPLETED")
         self.assertEqual(job["result"], {"ok": True})
 

@@ -53,6 +53,7 @@ def parse_args_to_cfg():
         "If the camera zoom in a lot, you can try 135, 200 or even larger values.",
     )
     parser.add_argument("--verbose", action="store_true", help="If true, draw intermediate results")
+    parser.add_argument("--skip_render", action="store_true", help="If true, skip rendering mesh videos")
     args = parser.parse_args()
 
     # Input
@@ -82,27 +83,26 @@ def parse_args_to_cfg():
     Log.info(f"[Output Dir]: {cfg.output_dir}")
     Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.preprocess_dir).mkdir(parents=True, exist_ok=True)
+    OmegaConf.set_struct(cfg, False)
+    cfg.skip_render = args.skip_render
+    OmegaConf.set_struct(cfg, True)
 
     # Copy raw-input-video to video_path
     Log.info(f"[Copy Video] {video_path} -> {cfg.video_path}")
     if not Path(cfg.video_path).exists() or get_video_lwh(video_path)[0] != get_video_lwh(cfg.video_path)[0]:
-        reader = get_video_reader(video_path)
-        writer = get_writer(cfg.video_path, fps=30, crf=CRF)
-        for img in tqdm(reader, total=get_video_lwh(video_path)[0], desc=f"Copy"):
-            writer.write_frame(img)
-        writer.close()
-        reader.close()
+        import shutil
+        shutil.copy(video_path, cfg.video_path)
 
     return cfg
 
 
-def get_paths_for_person(cfg, person_id: int):
+def get_paths_for_person(cfg, person_id):
     """Trả về dict các đường dẫn file riêng biệt cho từng người.
-    Dùng OmegaConf để đọc cfg.paths gốc, sau đó thêm hậu tố _p{person_id}.
+    Dùng OmegaConf để đọc cfg.paths gốc, sau đó thêm hậu tố _p{person_id} hoặc _{person_id}.
     Các đường dẫn SLAM/VO được dùng chung (không tách per-person).
     """
     p = cfg.paths
-    suffix = f"_p{person_id}"
+    suffix = f"_p{person_id}" if isinstance(person_id, int) else f"_{person_id}"
     preprocess_dir = Path(cfg.preprocess_dir)
     output_dir = Path(cfg.output_dir)
     return {
@@ -160,11 +160,24 @@ def run_vitpose(cfg, bbx_xyxy: torch.Tensor, person_id: int = 0, extractor=None)
 
 
 def precompute_vitpose(cfg, all_bbx_xyxy):
-    pending = [
-        (person_id, bbx_xyxy)
-        for person_id, bbx_xyxy in enumerate(all_bbx_xyxy)
-        if not Path(get_paths_for_person(cfg, person_id)["vitpose"]).exists()
-    ]
+    if isinstance(all_bbx_xyxy, dict):
+        pending = [
+            (person_id, bbx)
+            for person_id, bbx in all_bbx_xyxy.items()
+            if not Path(get_paths_for_person(cfg, person_id)["vitpose"]).exists()
+        ]
+    elif isinstance(all_bbx_xyxy, list) and all_bbx_xyxy and isinstance(all_bbx_xyxy[0], tuple):
+        pending = [
+            (person_id, bbx)
+            for person_id, bbx in all_bbx_xyxy
+            if not Path(get_paths_for_person(cfg, person_id)["vitpose"]).exists()
+        ]
+    else:
+        pending = [
+            (person_id, bbx_xyxy)
+            for person_id, bbx_xyxy in enumerate(all_bbx_xyxy)
+            if not Path(get_paths_for_person(cfg, person_id)["vitpose"]).exists()
+        ]
     if not pending:
         return
 
@@ -402,12 +415,13 @@ if __name__ == "__main__":
             torch.save(pred, paths_p["hmr4d_results"])
 
         # Render
-        render_incam(cfg, person_id=person_id)
-        render_global(cfg, person_id=person_id)
-        horiz_path = paths_p["incam_global_horiz_video"]
-        if not Path(horiz_path).exists():
-            Log.info(f"[Merge Videos P{person_id}]")
-            merge_videos_horizontal(
-                [paths_p["incam_video"], paths_p["global_video"]],
-                horiz_path
-            )
+        if not getattr(cfg, "skip_render", False):
+            render_incam(cfg, person_id=person_id)
+            render_global(cfg, person_id=person_id)
+            horiz_path = paths_p["incam_global_horiz_video"]
+            if not Path(horiz_path).exists():
+                Log.info(f"[Merge Videos P{person_id}]")
+                merge_videos_horizontal(
+                    [paths_p["incam_video"], paths_p["global_video"]],
+                    horiz_path
+                )

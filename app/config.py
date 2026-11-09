@@ -14,4 +14,5 @@ except ImportError:
     pass
 
 API_KEY = os.getenv("API_KEY")
+USE_SQL = os.getenv("USE_SQL", "false").lower() == "true"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./gvhmr.db")
